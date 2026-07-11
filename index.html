@@ -88,13 +88,13 @@
     gap:6px; padding:6px 12px 14px;
   }
   .cell{
-    aspect-ratio:1/1.02;
+    min-height:60px;
     background:var(--card);
     border-radius:12px;
     border:1px solid var(--line);
     display:flex; flex-direction:column; align-items:center;
     justify-content:flex-start;
-    padding:6px 2px 4px;
+    padding:6px 2px 5px;
     position:relative;
     font-size:13px;
   }
@@ -104,13 +104,14 @@
   .cell.today .num{color:var(--amber); }
   .cell.weekend .num{color:var(--red);}
   .cell .bar{
-    margin-top:4px; width:80%; display:flex; flex-direction:column; gap:2px;
+    margin-top:4px; width:100%; display:flex; flex-direction:column; gap:3px; align-items:center;
   }
   .cell .tag{
-    font-size:8.5px; background:var(--navy-2); color:#fff; border-radius:4px;
-    padding:1px 3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-size:10.5px; line-height:1.3; font-weight:700; color:#fff; border-radius:5px;
+    padding:2px 3px; white-space:normal; word-break:break-word; text-align:center;
+    width:94%;
   }
-  .cell .more{font-size:8.5px; color:var(--ink-dim);}
+  .cell .more{font-size:10px; color:var(--ink-dim); font-weight:600;}
   .cell .count-dot{
     position:absolute; top:5px; right:6px; width:6px; height:6px; border-radius:50%;
     background:var(--amber);
@@ -164,7 +165,7 @@
     font-variant-numeric:tabular-nums; white-space:nowrap;
   }
   .entry .desc{font-size:17px; font-weight:600; white-space:nowrap;}
-  .entry .who{font-size:11px; color:var(--ink-dim); display:block; margin-top:2px; font-weight:400;}
+  .entry .who{font-size:13px; color:var(--navy-2); display:block; margin-top:3px; font-weight:600;}
   .entry .del{color:var(--red); font-size:20px; padding:4px 6px; margin-left:2px;}
   .edit-hint{
     text-align:center; color:var(--ink-dim); font-size:11px; margin:-2px 0 10px;
@@ -184,6 +185,16 @@
     font-size:14px; background:var(--paper); color:var(--ink); font-family:inherit;
   }
   .add-form .col{flex:1;}
+  .cat-btns{display:flex; gap:8px; margin-bottom:10px;}
+  .cat-btn{
+    flex:1; padding:11px 4px; border-radius:10px; border:2px solid var(--line);
+    background:var(--paper); color:var(--ink); font-size:14px; font-weight:700;
+    font-family:inherit;
+  }
+  .cat-btn.active{color:#fff; border-color:transparent;}
+  .cat-btn[data-cat="安檢"].active{background:#2F6FA5;}
+  .cat-btn[data-cat="宣導"].active{background:#3E8E64;}
+  .cat-btn[data-cat="臨時"].active{background:#D6503F;}
   .add-btn{
     width:100%; background:var(--navy); color:#fff; border:none; border-radius:10px;
     padding:11px; font-size:14px; font-weight:700; margin-top:4px;
@@ -317,6 +328,14 @@ let selectedDateStr = null;
 let myName = "";
 let dayRef = null; // 目前正在監聽的 Realtime Database 參照
 let editingId = null; // 目前正在編輯的勤務 id（null 代表新增模式）
+let selectedCategory = ''; // 目前表單選取的分類
+
+const catColors = { '安檢':'#2F6FA5', '宣導':'#3E8E64', '臨時':'#D6503F' };
+function catColor(cat){ return catColors[cat] || 'var(--navy-2)'; }
+function composeDesc(en){
+  if(en.category){ return en.detail ? `${en.category}－${en.detail}` : en.category; }
+  return en.desc || '';
+}
 
 function pad(n){return n.toString().padStart(2,'0');}
 function dstr(y,m,d){return `${y}-${pad(m+1)}-${pad(d)}`;}
@@ -383,15 +402,20 @@ async function renderMonth(){
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
 
-  // find which days have entries this month
-  let activeDays = new Set();
+  // 抓取本月每一天的完整勤務資料，用於在格子上顯示時間＋分類
+  let dayEntries = {};
   if(firebaseReady){
     try{
       const start = dstr(y,m,1);
       const end = dstr(y,m,daysInMonth);
       const snap = await db.ref('days').orderByKey().startAt(start).endAt(end).once('value');
       snap.forEach(child=>{
-        if(child.hasChildren()) activeDays.add(child.key);
+        const val = child.val() || {};
+        const list = Object.keys(val).map(id=>({id, ...val[id]}));
+        if(list.length){
+          list.sort((a,b)=> timeToMin(a.start)-timeToMin(b.start));
+          dayEntries[child.key] = list;
+        }
       });
     }catch(e){ console.error(e); }
   }
@@ -399,12 +423,25 @@ async function renderMonth(){
   for(let i=0;i<firstDow;i++){
     const c = document.createElement('div'); c.className='cell empty'; grid.appendChild(c);
   }
+  const MAX_SHOW = 3;
   for(let d=1; d<=daysInMonth; d++){
     const ds = dstr(y,m,d);
     const dow = new Date(y,m,d).getDay();
     const c = document.createElement('div');
     c.className = 'cell' + (ds===todayStr() ? ' today':'') + ((dow===0||dow===6)?' weekend':'');
-    c.innerHTML = `<div class="num">${d}</div>` + (activeDays.has(ds) ? '<div class="count-dot"></div>':'');
+    const list = dayEntries[ds];
+    let barHtml = '';
+    if(list && list.length){
+      let tags = list.slice(0,MAX_SHOW).map(en=>{
+        const label = escapeHtml(en.category || en.desc || '');
+        return `<div class="tag" style="background:${catColor(en.category)}">${en.start}-${en.end}${label}</div>`;
+      }).join('');
+      if(list.length > MAX_SHOW){
+        tags += `<div class="more">+${list.length-MAX_SHOW}項</div>`;
+      }
+      barHtml = `<div class="bar">${tags}</div>`;
+    }
+    c.innerHTML = `<div class="num">${d}</div>${barHtml}`;
     c.onclick = ()=> openDay(ds);
     grid.appendChild(c);
   }
@@ -425,7 +462,7 @@ function fmtDateHeader(ds){
 function isEditingForm(){
   const active = document.activeElement;
   if(!active) return false;
-  return active.id==='fDesc' || active.id==='fStart' || active.id==='fEnd';
+  return active.id==='fDetail' || active.id==='fStart' || active.id==='fEnd';
 }
 
 async function openDay(ds){
@@ -443,19 +480,34 @@ async function openDay(ds){
         <div class="col"><label>開始</label><input type="time" id="fStart" value="15:00"></div>
         <div class="col"><label>結束</label><input type="time" id="fEnd" value="17:00"></div>
       </div>
-      <label>事項</label>
-      <input type="text" id="fDesc" placeholder="例如：安檢、宣導、訓練">
+      <label>分類</label>
+      <div class="cat-btns">
+        <button type="button" class="cat-btn" data-cat="安檢">安檢</button>
+        <button type="button" class="cat-btn" data-cat="宣導">宣導</button>
+        <button type="button" class="cat-btn" data-cat="臨時">臨時</button>
+      </div>
+      <label>細項（選填）</label>
+      <input type="text" id="fDetail" placeholder="例如：東側大門、消防設備檢查">
       <button class="add-btn" id="addBtn">新增勤務</button>
       <button class="cancel-edit-btn" id="cancelEditBtn" style="display:none;">取消編輯</button>
     </div>`;
 
+  document.querySelectorAll('.cat-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      selectedCategory = btn.getAttribute('data-cat');
+      document.querySelectorAll('.cat-btn').forEach(b=> b.classList.toggle('active', b===btn));
+    };
+  });
+
   function resetFormToAddMode(){
     editingId = null;
+    selectedCategory = '';
     document.getElementById('addBtn').textContent = '新增勤務';
     document.getElementById('cancelEditBtn').style.display = 'none';
     document.getElementById('fStart').value = '15:00';
     document.getElementById('fEnd').value = '17:00';
-    document.getElementById('fDesc').value = '';
+    document.getElementById('fDetail').value = '';
+    document.querySelectorAll('.cat-btn').forEach(b=> b.classList.remove('active'));
     document.querySelectorAll('.entry').forEach(el=> el.classList.remove('editing'));
   }
 
@@ -464,19 +516,19 @@ async function openDay(ds){
   document.getElementById('addBtn').onclick = async ()=>{
     const s = document.getElementById('fStart').value;
     const e = document.getElementById('fEnd').value;
-    const desc = document.getElementById('fDesc').value.trim();
+    const detail = document.getElementById('fDetail').value.trim();
     if(!s || !e){ showToast('請選擇開始與結束時間'); return; }
-    if(!desc){ showToast('請輸入事項'); return; }
+    if(!selectedCategory){ showToast('請選擇分類（安檢／宣導／臨時）'); return; }
     if(!myName){ document.getElementById('nameModal').classList.add('show'); return; }
     try{
       if(editingId){
-        await db.ref(`days/${selectedDateStr}/${editingId}`).update({ start:s, end:e, desc });
+        await db.ref(`days/${selectedDateStr}/${editingId}`).update({ start:s, end:e, category:selectedCategory, detail });
         showToast('已更新');
         resetFormToAddMode();
       } else {
         const id = Date.now()+'-'+Math.random().toString(36).slice(2,7);
-        await db.ref(`days/${selectedDateStr}/${id}`).set({ start:s, end:e, desc, name:myName, ts:Date.now() });
-        document.getElementById('fDesc').value = '';
+        await db.ref(`days/${selectedDateStr}/${id}`).set({ start:s, end:e, category:selectedCategory, detail, name:myName, ts:Date.now() });
+        document.getElementById('fDetail').value = '';
         showToast('已新增');
       }
     }catch(err){ console.error(err); showToast('操作失敗，請檢查網路'); }
@@ -515,7 +567,7 @@ function renderEntries(entries){
   sorted.forEach(en=>{
     const s = timeToMin(en.start), e = timeToMin(en.end);
     const left = (s/1440)*100, width = Math.max(((e-s)/1440)*100, 0.6);
-    html += `<div class="block" style="left:${left}%; width:${width}%;" title="${escapeHtml(en.desc)}"></div>`;
+    html += `<div class="block" style="left:${left}%; width:${width}%; background:${catColor(en.category)};" title="${escapeHtml(composeDesc(en))}"></div>`;
   });
   html += `</div><div class="hourlbl"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
 
@@ -525,7 +577,7 @@ function renderEntries(entries){
     sorted.forEach(en=>{
       html += `<div class="entry${en.id===editingId?' editing':''}" data-id="${en.id}">
         <div class="time">${en.start}–${en.end}</div>
-        <div class="desc">${escapeHtml(en.desc)}<span class="who">${escapeHtml(en.name||'')}</span></div>
+        <div class="desc">${escapeHtml(composeDesc(en))}<span class="who">${escapeHtml(en.name||'')}新增</span></div>
         <div class="del" data-id="${en.id}">🗑</div>
       </div>`;
     });
@@ -543,11 +595,13 @@ function renderEntries(entries){
       editingId = id;
       document.getElementById('fStart').value = en.start;
       document.getElementById('fEnd').value = en.end;
-      document.getElementById('fDesc').value = en.desc;
+      selectedCategory = en.category || '';
+      document.querySelectorAll('.cat-btn').forEach(b=> b.classList.toggle('active', b.getAttribute('data-cat')===selectedCategory));
+      document.getElementById('fDetail').value = en.detail || (en.category ? '' : (en.desc || ''));
       document.getElementById('addBtn').textContent = '更新勤務';
       document.getElementById('cancelEditBtn').style.display = 'block';
       area.querySelectorAll('.entry').forEach(el=> el.classList.toggle('editing', el.getAttribute('data-id')===id));
-      document.getElementById('fDesc').focus();
+      document.getElementById('fDetail').focus();
     });
   });
 
@@ -556,7 +610,7 @@ function renderEntries(entries){
       e.stopPropagation();
       const id = btn.getAttribute('data-id');
       const en = sorted.find(x=>x.id===id);
-      const label = en ? `${en.start}–${en.end}　${en.desc}` : '這筆勤務';
+      const label = en ? `${en.start}–${en.end}　${composeDesc(en)}` : '這筆勤務';
       const ok = await showConfirm(`確定要刪除「${label}」嗎？此動作無法復原。`);
       if(!ok) return;
       try{
