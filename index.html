@@ -267,9 +267,11 @@
     <div class="sheet-head">
       <div style="display:flex; align-items:center; gap:6px;">
         <button class="navbtn" id="prevDay" style="width:30px;height:30px;font-size:14px;">‹</button>
-        <h2 id="sheetDate" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;">7月11日（六）</h2>
+        <div style="position:relative; display:inline-block;">
+          <h2 id="sheetDate" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;">7月11日（六）</h2>
+          <input type="date" id="datePicker" style="position:absolute; inset:0; left:0; top:0; width:100%; height:100%; opacity:0; border:none; margin:0; padding:0; cursor:pointer; font-size:16px;">
+        </div>
         <button class="navbtn" id="nextDay" style="width:30px;height:30px;font-size:14px;">›</button>
-        <input type="date" id="datePicker" style="position:absolute; opacity:0; width:1px; height:1px; pointer-events:none;">
       </div>
       <div class="close" id="closeSheet">✕</div>
     </div>
@@ -479,6 +481,7 @@ async function openDay(ds){
   selectedDateStr = ds;
   editingId = null;
   document.getElementById('sheetDate').textContent = fmtDateHeader(ds);
+  document.getElementById('datePicker').value = ds;
   document.getElementById('overlay').classList.add('show');
 
   const body = document.getElementById('sheetBody');
@@ -563,12 +566,6 @@ function changeDay(delta){
 document.getElementById('prevDay').onclick = ()=> changeDay(-1);
 document.getElementById('nextDay').onclick = ()=> changeDay(1);
 
-document.getElementById('sheetDate').onclick = ()=>{
-  const picker = document.getElementById('datePicker');
-  picker.value = selectedDateStr;
-  if(picker.showPicker){ picker.showPicker(); }
-  else{ picker.focus(); picker.click(); }
-};
 document.getElementById('datePicker').onchange = (e)=>{
   const v = e.target.value;
   if(v) openDay(v);
