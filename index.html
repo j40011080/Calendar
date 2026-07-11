@@ -266,13 +266,10 @@
   <div class="sheet">
     <div class="sheet-head">
       <div style="display:flex; align-items:center; gap:8px;">
-        <button class="navbtn" id="prevDay" style="width:30px;height:30px;font-size:14px; flex-shrink:0;">‹</button>
-        <h2 id="sheetDate" style="margin:0; white-space:nowrap;">7月11日（六）</h2>
-        <div style="position:relative; width:30px; height:30px; flex-shrink:0;">
-          <div class="navbtn" style="width:30px;height:30px;font-size:14px; pointer-events:none;">📅</div>
+        <div style="position:relative; display:inline-block;">
+          <h2 id="sheetDate" style="margin:0; white-space:nowrap; cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;">7月11日（六）</h2>
           <input type="date" id="datePicker" style="position:absolute; inset:0; left:0; top:0; width:100%; height:100%; opacity:0.011; border:none; margin:0; padding:0; cursor:pointer; box-sizing:border-box;">
         </div>
-        <button class="navbtn" id="nextDay" style="width:30px;height:30px;font-size:14px; flex-shrink:0;">›</button>
       </div>
       <div class="close" id="closeSheet">✕</div>
     </div>
@@ -556,16 +553,6 @@ async function openDay(ds){
     renderEntries(entries);
   }, err=>{ console.error(err); });
 }
-
-function changeDay(delta){
-  if(!selectedDateStr) return;
-  const [y,m,d] = selectedDateStr.split('-').map(Number);
-  const dt = new Date(y, m-1, d);
-  dt.setDate(dt.getDate()+delta);
-  openDay(dstr(dt.getFullYear(), dt.getMonth(), dt.getDate()));
-}
-document.getElementById('prevDay').onclick = ()=> changeDay(-1);
-document.getElementById('nextDay').onclick = ()=> changeDay(1);
 
 document.getElementById('datePicker').onchange = (e)=>{
   const v = e.target.value;
