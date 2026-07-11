@@ -139,15 +139,21 @@
 
   .entry{
     background:var(--card); border:1px solid var(--line); border-radius:12px;
-    padding:10px 12px; margin-bottom:8px; display:flex; align-items:center; gap:10px;
+    padding:12px 16px; margin-bottom:10px; display:flex; align-items:center; gap:14px;
+    width:fit-content; max-width:100%; cursor:pointer; transition:border-color .15s, box-shadow .15s;
   }
+  .entry:active{background:var(--paper);}
+  .entry.editing{border-color:var(--amber); box-shadow:0 0 0 2px var(--amber-dim);}
   .entry .time{
-    font-weight:700; color:var(--navy); font-size:13px; min-width:70px;
-    font-variant-numeric:tabular-nums;
+    font-weight:700; color:var(--navy); font-size:16px;
+    font-variant-numeric:tabular-nums; white-space:nowrap;
   }
-  .entry .desc{flex:1; font-size:14px;}
-  .entry .who{font-size:10px; color:var(--ink-dim); display:block; margin-top:2px;}
-  .entry .del{color:var(--red); font-size:18px; padding:4px 6px;}
+  .entry .desc{font-size:17px; font-weight:600; white-space:nowrap;}
+  .entry .who{font-size:11px; color:var(--ink-dim); display:block; margin-top:2px; font-weight:400;}
+  .entry .del{color:var(--red); font-size:20px; padding:4px 6px; margin-left:2px;}
+  .edit-hint{
+    text-align:center; color:var(--ink-dim); font-size:11px; margin:-2px 0 10px;
+  }
   .empty-hint{
     text-align:center; color:var(--ink-dim); font-size:13px; padding:20px 0;
   }
@@ -168,6 +174,10 @@
     padding:11px; font-size:14px; font-weight:700; margin-top:4px;
   }
   .add-btn:active{background:var(--navy-2);}
+  .cancel-edit-btn{
+    width:100%; background:var(--paper); color:var(--navy); border:1px solid var(--line);
+    border-radius:10px; padding:9px; font-size:13px; font-weight:600; margin-top:8px;
+  }
 
   .fab-add{
     position:fixed; bottom:20px; right:20px; width:54px; height:54px; border-radius:50%;
@@ -245,6 +255,17 @@
   </div>
 </div>
 
+<div class="name-modal" id="confirmModal">
+  <div class="name-box">
+    <h3>確定要刪除嗎？</h3>
+    <p id="confirmText" style="margin-bottom:16px;"></p>
+    <div style="display:flex; gap:10px;">
+      <button id="confirmNo" style="flex:1; background:var(--paper); color:var(--navy); border:1px solid var(--line); border-radius:10px; padding:11px; font-size:14px; font-weight:700;">取消</button>
+      <button id="confirmYes" style="flex:1; background:var(--red); color:#fff; border:none; border-radius:10px; padding:11px; font-size:14px; font-weight:700;">確定刪除</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -280,6 +301,7 @@ current.setDate(1);
 let selectedDateStr = null;
 let myName = "";
 let dayRef = null; // 目前正在監聽的 Realtime Database 參照
+let editingId = null; // 目前正在編輯的勤務 id（null 代表新增模式）
 
 function pad(n){return n.toString().padStart(2,'0');}
 function dstr(y,m,d){return `${y}-${pad(m+1)}-${pad(d)}`;}
@@ -297,6 +319,23 @@ function checkFirebaseReady(){
     return false;
   }
   return true;
+}
+
+function showConfirm(msg){
+  return new Promise(resolve=>{
+    document.getElementById('confirmText').textContent = msg;
+    const modal = document.getElementById('confirmModal');
+    const yes = document.getElementById('confirmYes');
+    const no = document.getElementById('confirmNo');
+    modal.classList.add('show');
+    function cleanup(result){
+      modal.classList.remove('show');
+      yes.onclick = null; no.onclick = null;
+      resolve(result);
+    }
+    yes.onclick = ()=> cleanup(true);
+    no.onclick = ()=> cleanup(false);
+  });
 }
 
 // ---------- Name（存在這台裝置的瀏覽器裡，不需登入系統） ----------
@@ -377,11 +416,13 @@ function isEditingForm(){
 async function openDay(ds){
   if(!checkFirebaseReady()) return;
   selectedDateStr = ds;
+  editingId = null;
   document.getElementById('sheetDate').textContent = fmtDateHeader(ds);
   document.getElementById('overlay').classList.add('show');
 
   const body = document.getElementById('sheetBody');
   body.innerHTML = `<div id="entriesArea"></div>
+    <div class="edit-hint">輕觸上方任一筆勤務可修改時間或事項</div>
     <div class="add-form">
       <div class="row">
         <div class="col"><label>開始</label><input type="time" id="fStart" value="15:00"></div>
@@ -390,7 +431,20 @@ async function openDay(ds){
       <label>事項</label>
       <input type="text" id="fDesc" placeholder="例如：安檢、宣導、訓練">
       <button class="add-btn" id="addBtn">新增勤務</button>
+      <button class="cancel-edit-btn" id="cancelEditBtn" style="display:none;">取消編輯</button>
     </div>`;
+
+  function resetFormToAddMode(){
+    editingId = null;
+    document.getElementById('addBtn').textContent = '新增勤務';
+    document.getElementById('cancelEditBtn').style.display = 'none';
+    document.getElementById('fStart').value = '15:00';
+    document.getElementById('fEnd').value = '17:00';
+    document.getElementById('fDesc').value = '';
+    document.querySelectorAll('.entry').forEach(el=> el.classList.remove('editing'));
+  }
+
+  document.getElementById('cancelEditBtn').onclick = resetFormToAddMode;
 
   document.getElementById('addBtn').onclick = async ()=>{
     const s = document.getElementById('fStart').value;
@@ -400,11 +454,17 @@ async function openDay(ds){
     if(!desc){ showToast('請輸入事項'); return; }
     if(!myName){ document.getElementById('nameModal').classList.add('show'); return; }
     try{
-      const id = Date.now()+'-'+Math.random().toString(36).slice(2,7);
-      await db.ref(`days/${selectedDateStr}/${id}`).set({ start:s, end:e, desc, name:myName, ts:Date.now() });
-      document.getElementById('fDesc').value = '';
-      showToast('已新增');
-    }catch(err){ console.error(err); showToast('新增失敗，請檢查網路'); }
+      if(editingId){
+        await db.ref(`days/${selectedDateStr}/${editingId}`).update({ start:s, end:e, desc });
+        showToast('已更新');
+        resetFormToAddMode();
+      } else {
+        const id = Date.now()+'-'+Math.random().toString(36).slice(2,7);
+        await db.ref(`days/${selectedDateStr}/${id}`).set({ start:s, end:e, desc, name:myName, ts:Date.now() });
+        document.getElementById('fDesc').value = '';
+        showToast('已新增');
+      }
+    }catch(err){ console.error(err); showToast('操作失敗，請檢查網路'); }
   };
 
   // 取消上一個監聽，改監聽新的日期
@@ -421,6 +481,7 @@ document.getElementById('closeSheet').onclick = ()=>{
   document.getElementById('overlay').classList.remove('show');
   if(dayRef){ dayRef.off(); dayRef = null; }
   selectedDateStr = null;
+  editingId = null;
   renderMonth();
 };
 document.getElementById('overlay').onclick = (e)=>{ if(e.target.id==='overlay'){ document.getElementById('closeSheet').click(); } };
@@ -447,7 +508,7 @@ function renderEntries(entries){
     html += `<div class="empty-hint">當日尚無勤務登記</div>`;
   } else {
     sorted.forEach(en=>{
-      html += `<div class="entry">
+      html += `<div class="entry${en.id===editingId?' editing':''}" data-id="${en.id}">
         <div class="time">${en.start}–${en.end}</div>
         <div class="desc">${escapeHtml(en.desc)}<span class="who">${escapeHtml(en.name||'')}</span></div>
         <div class="del" data-id="${en.id}">🗑</div>
@@ -457,11 +518,39 @@ function renderEntries(entries){
 
   area.innerHTML = html;
 
+  // 點擊整筆勤務（非垃圾桶）進入編輯模式
+  area.querySelectorAll('.entry').forEach(row=>{
+    row.addEventListener('click', (e)=>{
+      if(e.target.closest('.del')) return;
+      const id = row.getAttribute('data-id');
+      const en = sorted.find(x=>x.id===id);
+      if(!en) return;
+      editingId = id;
+      document.getElementById('fStart').value = en.start;
+      document.getElementById('fEnd').value = en.end;
+      document.getElementById('fDesc').value = en.desc;
+      document.getElementById('addBtn').textContent = '更新勤務';
+      document.getElementById('cancelEditBtn').style.display = 'block';
+      area.querySelectorAll('.entry').forEach(el=> el.classList.toggle('editing', el.getAttribute('data-id')===id));
+      document.getElementById('fDesc').focus();
+    });
+  });
+
   area.querySelectorAll('.del').forEach(btn=>{
-    btn.onclick = async ()=>{
+    btn.onclick = async (e)=>{
+      e.stopPropagation();
       const id = btn.getAttribute('data-id');
+      const en = sorted.find(x=>x.id===id);
+      const label = en ? `${en.start}–${en.end}　${en.desc}` : '這筆勤務';
+      const ok = await showConfirm(`確定要刪除「${label}」嗎？此動作無法復原。`);
+      if(!ok) return;
       try{
         await db.ref(`days/${selectedDateStr}/${id}`).remove();
+        if(editingId === id){
+          editingId = null;
+          document.getElementById('addBtn').textContent = '新增勤務';
+          document.getElementById('cancelEditBtn').style.display = 'none';
+        }
         showToast('已刪除');
       }catch(err){ console.error(err); showToast('刪除失敗，請檢查網路'); }
     };
