@@ -194,7 +194,7 @@
   .cat-btn.active{color:#fff; border-color:transparent;}
   .cat-btn[data-cat="安檢"].active{background:#2F6FA5;}
   .cat-btn[data-cat="宣導"].active{background:#3E8E64;}
-  .cat-btn[data-cat="臨時"].active{background:#D6503F;}
+  .cat-btn[data-cat="其他"].active{background:#D6503F;}
   .add-btn{
     width:100%; background:var(--navy); color:#fff; border:none; border-radius:10px;
     padding:11px; font-size:14px; font-weight:700; margin-top:4px;
@@ -330,7 +330,7 @@ let dayRef = null; // 目前正在監聽的 Realtime Database 參照
 let editingId = null; // 目前正在編輯的勤務 id（null 代表新增模式）
 let selectedCategory = ''; // 目前表單選取的分類
 
-const catColors = { '安檢':'#2F6FA5', '宣導':'#3E8E64', '臨時':'#D6503F' };
+const catColors = { '安檢':'#2F6FA5', '宣導':'#3E8E64', '其他':'#D6503F' };
 function catColor(cat){ return catColors[cat] || 'var(--navy-2)'; }
 function composeDesc(en){
   if(en.category){ return en.detail ? `${en.category}－${en.detail}` : en.category; }
@@ -484,7 +484,7 @@ async function openDay(ds){
       <div class="cat-btns">
         <button type="button" class="cat-btn" data-cat="安檢">安檢</button>
         <button type="button" class="cat-btn" data-cat="宣導">宣導</button>
-        <button type="button" class="cat-btn" data-cat="臨時">臨時</button>
+        <button type="button" class="cat-btn" data-cat="其他">其他</button>
       </div>
       <label>細項（選填）</label>
       <input type="text" id="fDetail" placeholder="例如：東側大門、消防設備檢查">
@@ -518,7 +518,7 @@ async function openDay(ds){
     const e = document.getElementById('fEnd').value;
     const detail = document.getElementById('fDetail').value.trim();
     if(!s || !e){ showToast('請選擇開始與結束時間'); return; }
-    if(!selectedCategory){ showToast('請選擇分類（安檢／宣導／臨時）'); return; }
+    if(!selectedCategory){ showToast('請選擇分類（安檢／宣導／其他）'); return; }
     if(!myName){ document.getElementById('nameModal').classList.add('show'); return; }
     try{
       if(editingId){
