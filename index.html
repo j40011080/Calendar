@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>勤務行事曆</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
   :root{
     --navy:#16233F;
@@ -209,7 +211,6 @@
 <div class="topbar">
   <div>
     <h1>勤務行事曆</h1>
-    <div class="sub" id="teamNote">30 人共用・即時同步</div>
   </div>
   <div class="name-chip" id="nameChip"><span class="dot"></span><span id="nameChipText">設定姓名</span></div>
 </div>
@@ -221,7 +222,7 @@
 </div>
 <div class="weekrow"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
 <div class="grid" id="grid"></div>
-<div class="sync-note">輕觸日期新增或查看當日勤務・所有人看到的資料即時同步</div>
+<div class="sync-note">輕觸日期新增或查看當日勤務・使用 Firebase 即時同步</div>
 
 <button class="fab-add" id="fabAdd">＋</button>
 
@@ -247,11 +248,38 @@
 <div class="toast" id="toast"></div>
 
 <script>
+/* ====== 請把下面換成你自己 Firebase 專案「網頁應用程式」的設定值 ======
+   注意：Realtime Database 一定要有 databaseURL 這個欄位！
+   如果專案設定頁給你的設定值裡沒有 databaseURL，
+   就去 Realtime Database 的「資料」分頁最上面複製那個網址
+   （長得像 https://xxxx-default-rtdb.asia-southeast1.firebasedatabase.app）貼進來。
+*/
+const firebaseConfig = {
+  apiKey: "AIzaSyDcw0jQkqdjZXgyE4mFKtFwzxrKXDsyZkc",
+  authDomain: "calendar-d8ff0.firebaseapp.com",
+  databaseURL: "https://calendar-d8ff0-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "calendar-d8ff0",
+  storageBucket: "calendar-d8ff0.firebasestorage.app",
+  messagingSenderId: "769782915206",
+  appId: "1:769782915206:web:83466b3d4728a691b73107"
+};
+/* ================================================================= */
+
+let db = null;
+let firebaseReady = false;
+try{
+  if(firebaseConfig.apiKey !== "YOUR_API_KEY"){
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    firebaseReady = true;
+  }
+}catch(e){ console.error('Firebase 初始化失敗', e); }
+
 let current = new Date();
 current.setDate(1);
 let selectedDateStr = null;
 let myName = "";
-let dayPoll = null;
+let dayRef = null; // 目前正在監聽的 Realtime Database 參照
 
 function pad(n){return n.toString().padStart(2,'0');}
 function dstr(y,m,d){return `${y}-${pad(m+1)}-${pad(d)}`;}
@@ -263,27 +291,31 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 1800);
 }
 
-// ---------- Name (personal storage) ----------
-async function loadName(){
-  try{
-    const r = await window.storage.get('myname', false);
-    if(r && r.value){ myName = r.value; document.getElementById('nameChipText').textContent = myName; }
-    else { document.getElementById('nameModal').classList.add('show'); }
-  }catch(e){
-    document.getElementById('nameModal').classList.add('show');
+function checkFirebaseReady(){
+  if(!firebaseReady){
+    showToast('尚未設定 Firebase，請先完成設定');
+    return false;
   }
+  return true;
+}
+
+// ---------- Name（存在這台裝置的瀏覽器裡，不需登入系統） ----------
+function loadName(){
+  const v = localStorage.getItem('myname');
+  if(v){ myName = v; document.getElementById('nameChipText').textContent = myName; }
+  else { document.getElementById('nameModal').classList.add('show'); }
 }
 document.getElementById('nameChip').onclick = ()=>{
   document.getElementById('nameInput').value = myName;
   document.getElementById('nameModal').classList.add('show');
 };
-document.getElementById('saveName').onclick = async ()=>{
+document.getElementById('saveName').onclick = ()=>{
   const v = document.getElementById('nameInput').value.trim();
   if(!v){ showToast('請輸入姓名'); return; }
   myName = v;
   document.getElementById('nameChipText').textContent = v;
   document.getElementById('nameModal').classList.remove('show');
-  try{ await window.storage.set('myname', v, false); }catch(e){}
+  localStorage.setItem('myname', v);
 };
 
 // ---------- Month rendering ----------
@@ -299,13 +331,16 @@ async function renderMonth(){
 
   // find which days have entries this month
   let activeDays = new Set();
-  try{
-    const prefix = `entries:${y}-${pad(m+1)}`;
-    const res = await window.storage.list(prefix, true);
-    if(res && res.keys){
-      res.keys.forEach(k=>{ const parts = k.split(':'); if(parts[1]) activeDays.add(parts[1]); });
-    }
-  }catch(e){}
+  if(firebaseReady){
+    try{
+      const start = dstr(y,m,1);
+      const end = dstr(y,m,daysInMonth);
+      const snap = await db.ref('days').orderByKey().startAt(start).endAt(end).once('value');
+      snap.forEach(child=>{
+        if(child.hasChildren()) activeDays.add(child.key);
+      });
+    }catch(e){ console.error(e); }
+  }
 
   for(let i=0;i<firstDow;i++){
     const c = document.createElement('div'); c.className='cell empty'; grid.appendChild(c);
@@ -333,84 +368,29 @@ function fmtDateHeader(ds){
   return `${m}月${d}日（${wd}）`;
 }
 
+function isEditingForm(){
+  const active = document.activeElement;
+  if(!active) return false;
+  return active.id==='fDesc' || active.id==='fStart' || active.id==='fEnd';
+}
+
 async function openDay(ds){
+  if(!checkFirebaseReady()) return;
   selectedDateStr = ds;
   document.getElementById('sheetDate').textContent = fmtDateHeader(ds);
   document.getElementById('overlay').classList.add('show');
-  await refreshDay();
-  clearInterval(dayPoll);
-  dayPoll = setInterval(refreshDay, 4000);
-}
 
-document.getElementById('closeSheet').onclick = ()=>{
-  document.getElementById('overlay').classList.remove('show');
-  clearInterval(dayPoll);
-  renderMonth();
-};
-document.getElementById('overlay').onclick = (e)=>{ if(e.target.id==='overlay'){ document.getElementById('closeSheet').click(); } };
-
-async function fetchEntries(ds){
-  try{
-    const r = await window.storage.get(`entries:${ds}`, true);
-    if(r && r.value) return JSON.parse(r.value);
-    return [];
-  }catch(e){ return []; }
-}
-async function saveEntries(ds, arr){
-  await window.storage.set(`entries:${ds}`, JSON.stringify(arr), true);
-}
-
-async function refreshDay(){
-  if(!selectedDateStr) return;
-  const entries = await fetchEntries(selectedDateStr);
-  entries.sort((a,b)=> timeToMin(a.start)-timeToMin(b.start));
   const body = document.getElementById('sheetBody');
-
-  let html = '';
-  // timeline
-  html += `<div class="timeline" id="timeline">`;
-  for(let h=0; h<=24; h+=6){ html += `<div class="tick" style="left:${(h/24)*100}%"></div>`; }
-  entries.forEach(en=>{
-    const s = timeToMin(en.start), e = timeToMin(en.end);
-    const left = (s/1440)*100, width = Math.max(((e-s)/1440)*100, 0.6);
-    html += `<div class="block" style="left:${left}%; width:${width}%;" title="${en.desc}"></div>`;
-  });
-  html += `</div><div class="hourlbl"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
-
-  if(entries.length===0){
-    html += `<div class="empty-hint">當日尚無勤務登記</div>`;
-  } else {
-    entries.forEach(en=>{
-      html += `<div class="entry">
-        <div class="time">${en.start}–${en.end}</div>
-        <div class="desc">${escapeHtml(en.desc)}<span class="who">${escapeHtml(en.name||'')}</span></div>
-        <div class="del" data-id="${en.id}">🗑</div>
-      </div>`;
-    });
-  }
-
-  html += `<div class="add-form">
-    <div class="row">
-      <div class="col"><label>開始</label><input type="time" id="fStart" value="15:00"></div>
-      <div class="col"><label>結束</label><input type="time" id="fEnd" value="17:00"></div>
-    </div>
-    <label>事項</label>
-    <input type="text" id="fDesc" placeholder="例如：安檢、宣導、訓練">
-    <button class="add-btn" id="addBtn">新增勤務</button>
-  </div>`;
-
-  body.innerHTML = html;
-
-  body.querySelectorAll('.del').forEach(btn=>{
-    btn.onclick = async ()=>{
-      const id = btn.getAttribute('data-id');
-      const cur = await fetchEntries(selectedDateStr);
-      const next = cur.filter(x=>x.id!==id);
-      await saveEntries(selectedDateStr, next);
-      showToast('已刪除');
-      refreshDay();
-    };
-  });
+  body.innerHTML = `<div id="entriesArea"></div>
+    <div class="add-form">
+      <div class="row">
+        <div class="col"><label>開始</label><input type="time" id="fStart" value="15:00"></div>
+        <div class="col"><label>結束</label><input type="time" id="fEnd" value="17:00"></div>
+      </div>
+      <label>事項</label>
+      <input type="text" id="fDesc" placeholder="例如：安檢、宣導、訓練">
+      <button class="add-btn" id="addBtn">新增勤務</button>
+    </div>`;
 
   document.getElementById('addBtn').onclick = async ()=>{
     const s = document.getElementById('fStart').value;
@@ -419,12 +399,73 @@ async function refreshDay(){
     if(!s || !e){ showToast('請選擇開始與結束時間'); return; }
     if(!desc){ showToast('請輸入事項'); return; }
     if(!myName){ document.getElementById('nameModal').classList.add('show'); return; }
-    const cur = await fetchEntries(selectedDateStr);
-    cur.push({ id: Date.now()+'-'+Math.random().toString(36).slice(2,7), start:s, end:e, desc, name:myName, ts:Date.now() });
-    await saveEntries(selectedDateStr, cur);
-    showToast('已新增');
-    refreshDay();
+    try{
+      const id = Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      await db.ref(`days/${selectedDateStr}/${id}`).set({ start:s, end:e, desc, name:myName, ts:Date.now() });
+      document.getElementById('fDesc').value = '';
+      showToast('已新增');
+    }catch(err){ console.error(err); showToast('新增失敗，請檢查網路'); }
   };
+
+  // 取消上一個監聽，改監聽新的日期
+  if(dayRef) dayRef.off();
+  dayRef = db.ref(`days/${ds}`);
+  dayRef.on('value', snap=>{
+    const val = snap.val() || {};
+    const entries = Object.keys(val).map(id => ({ id, ...val[id] }));
+    renderEntries(entries);
+  }, err=>{ console.error(err); });
+}
+
+document.getElementById('closeSheet').onclick = ()=>{
+  document.getElementById('overlay').classList.remove('show');
+  if(dayRef){ dayRef.off(); dayRef = null; }
+  selectedDateStr = null;
+  renderMonth();
+};
+document.getElementById('overlay').onclick = (e)=>{ if(e.target.id==='overlay'){ document.getElementById('closeSheet').click(); } };
+
+function renderEntries(entries){
+  const area = document.getElementById('entriesArea');
+  if(!area) return;
+  // 使用者正在打字/選時間時，先不要重繪，避免鍵盤被打斷
+  if(isEditingForm()) return;
+
+  const sorted = [...entries].sort((a,b)=> timeToMin(a.start)-timeToMin(b.start));
+
+  let html = '';
+  html += `<div class="timeline" id="timeline">`;
+  for(let h=0; h<=24; h+=6){ html += `<div class="tick" style="left:${(h/24)*100}%"></div>`; }
+  sorted.forEach(en=>{
+    const s = timeToMin(en.start), e = timeToMin(en.end);
+    const left = (s/1440)*100, width = Math.max(((e-s)/1440)*100, 0.6);
+    html += `<div class="block" style="left:${left}%; width:${width}%;" title="${escapeHtml(en.desc)}"></div>`;
+  });
+  html += `</div><div class="hourlbl"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
+
+  if(sorted.length===0){
+    html += `<div class="empty-hint">當日尚無勤務登記</div>`;
+  } else {
+    sorted.forEach(en=>{
+      html += `<div class="entry">
+        <div class="time">${en.start}–${en.end}</div>
+        <div class="desc">${escapeHtml(en.desc)}<span class="who">${escapeHtml(en.name||'')}</span></div>
+        <div class="del" data-id="${en.id}">🗑</div>
+      </div>`;
+    });
+  }
+
+  area.innerHTML = html;
+
+  area.querySelectorAll('.del').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.getAttribute('data-id');
+      try{
+        await db.ref(`days/${selectedDateStr}/${id}`).remove();
+        showToast('已刪除');
+      }catch(err){ console.error(err); showToast('刪除失敗，請檢查網路'); }
+    };
+  });
 }
 
 function escapeHtml(s){
@@ -432,9 +473,12 @@ function escapeHtml(s){
 }
 
 // ---------- init ----------
-(async function init(){
-  await loadName();
-  await renderMonth();
+(function init(){
+  loadName();
+  if(!firebaseReady){
+    showToast('尚未設定 Firebase，請完成設定後重新整理');
+  }
+  renderMonth();
 })();
 </script>
 </body>
