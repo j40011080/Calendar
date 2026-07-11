@@ -265,7 +265,12 @@
 <div class="overlay" id="overlay">
   <div class="sheet">
     <div class="sheet-head">
-      <h2 id="sheetDate">7月11日（六）</h2>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button class="navbtn" id="prevDay" style="width:30px;height:30px;font-size:14px;">‹</button>
+        <h2 id="sheetDate" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;">7月11日（六）</h2>
+        <button class="navbtn" id="nextDay" style="width:30px;height:30px;font-size:14px;">›</button>
+        <input type="date" id="datePicker" style="position:absolute; opacity:0; width:1px; height:1px; pointer-events:none;">
+      </div>
       <div class="close" id="closeSheet">✕</div>
     </div>
     <div class="sheet-body" id="sheetBody"></div>
@@ -434,7 +439,7 @@ async function renderMonth(){
     if(list && list.length){
       let tags = list.slice(0,MAX_SHOW).map(en=>{
         const label = escapeHtml(en.category || en.desc || '');
-        return `<div class="tag" style="background:${catColor(en.category)}">${en.start}-${en.end}${label}</div>`;
+        return `<div class="tag" style="background:${catColor(en.category)}">${fmtTimeShort(en.start)}-${fmtTimeShort(en.end)}${label}</div>`;
       }).join('');
       if(list.length > MAX_SHOW){
         tags += `<div class="more">+${list.length-MAX_SHOW}項</div>`;
@@ -453,6 +458,10 @@ document.getElementById('fabAdd').onclick = ()=> openDay(todayStr());
 
 // ---------- Day sheet ----------
 function timeToMin(t){ const [h,mi] = t.split(':').map(Number); return h*60+mi; }
+function fmtTimeShort(t){
+  const [h,mi] = t.split(':');
+  return mi==='00' ? String(Number(h)) : t;
+}
 function fmtDateHeader(ds){
   const [y,m,d] = ds.split('-').map(Number);
   const wd = ['日','一','二','三','四','五','六'][new Date(y,m-1,d).getDay()];
@@ -544,6 +553,27 @@ async function openDay(ds){
   }, err=>{ console.error(err); });
 }
 
+function changeDay(delta){
+  if(!selectedDateStr) return;
+  const [y,m,d] = selectedDateStr.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  dt.setDate(dt.getDate()+delta);
+  openDay(dstr(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+}
+document.getElementById('prevDay').onclick = ()=> changeDay(-1);
+document.getElementById('nextDay').onclick = ()=> changeDay(1);
+
+document.getElementById('sheetDate').onclick = ()=>{
+  const picker = document.getElementById('datePicker');
+  picker.value = selectedDateStr;
+  if(picker.showPicker){ picker.showPicker(); }
+  else{ picker.focus(); picker.click(); }
+};
+document.getElementById('datePicker').onchange = (e)=>{
+  const v = e.target.value;
+  if(v) openDay(v);
+};
+
 document.getElementById('closeSheet').onclick = ()=>{
   document.getElementById('overlay').classList.remove('show');
   if(dayRef){ dayRef.off(); dayRef = null; }
@@ -569,7 +599,7 @@ function renderEntries(entries){
     const left = (s/1440)*100, width = Math.max(((e-s)/1440)*100, 0.6);
     html += `<div class="block" style="left:${left}%; width:${width}%; background:${catColor(en.category)};" title="${escapeHtml(composeDesc(en))}"></div>`;
   });
-  html += `</div><div class="hourlbl"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
+  html += `</div>`;
 
   if(sorted.length===0){
     html += `<div class="empty-hint">當日尚無勤務登記</div>`;
