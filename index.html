@@ -554,6 +554,11 @@ async function openDay(ds){
   }, err=>{ console.error(err); });
 }
 
+document.getElementById('datePicker').addEventListener('click', function(){
+  if(typeof this.showPicker === 'function'){
+    try{ this.showPicker(); }catch(e){}
+  }
+});
 document.getElementById('datePicker').onchange = (e)=>{
   const v = e.target.value;
   if(v) openDay(v);
