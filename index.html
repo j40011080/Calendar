@@ -240,9 +240,23 @@
     width:100%; background:var(--navy); color:#fff; border:none; border-radius:10px;
     padding:11px; font-size:14px; font-weight:700;
   }
+
+  .updatebanner{
+    display:none; position:fixed; top:0; left:0; right:0; z-index:200;
+    text-align:center; background:var(--amber); color:var(--navy);
+    font-weight:700; font-size:13px; padding:10px 12px; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,.25); animation:updateblink 1.2s infinite;
+  }
+  .updatebanner.show{display:block;}
+  @keyframes updateblink{
+    0%,100%{opacity:1;}
+    50%{opacity:.4;}
+  }
 </style>
 </head>
 <body>
+
+<div id="updateBanner" class="updatebanner">🔔 偵測到 GitHub 上已有新版本，點此立即更新畫面</div>
 
 <div class="topbar">
   <div>
@@ -649,6 +663,39 @@ function renderEntries(entries){
 function escapeHtml(s){
   return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// ---------- 自動偵測改版（GitHub 更新後自動提示，不用重新安裝/清快取） ----------
+(function(){
+  const bannerEl = document.getElementById('updateBanner');
+  let baselineTag = null;
+  let checking = false;
+
+  function selfUrl(){
+    return location.origin + location.pathname; // 不含 query/hash，固定指向本頁面檔案本身
+  }
+  function getPageVersionTag(){
+    return fetch(selfUrl(), {method:'HEAD', cache:'no-store'})
+      .then(res => res.headers.get('etag') || res.headers.get('last-modified') || null)
+      .catch(()=> null);
+  }
+  function checkForUpdate(){
+    if(checking || bannerEl.classList.contains('show')) return;
+    checking = true;
+    getPageVersionTag().then(tag=>{
+      checking = false;
+      if(tag && baselineTag && tag !== baselineTag){
+        bannerEl.classList.add('show');
+      }
+    });
+  }
+  bannerEl.addEventListener('click', ()=>{
+    // 用帶時間戳的網址強制略過瀏覽器/桌面圖示的快取，抓最新版本
+    location.href = selfUrl() + '?_r=' + Date.now();
+  });
+  getPageVersionTag().then(tag=>{ baselineTag = tag; });
+  setInterval(checkForUpdate, 3*60*1000); // 每 3 分鐘背景檢查一次
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkForUpdate(); });
+})();
 
 // ---------- init ----------
 (function init(){
